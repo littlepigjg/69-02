@@ -4,6 +4,10 @@ const storage = require('./storage');
 const status = require('./status');
 const scheduler = require('./scheduler');
 const notifier = require('./notifier');
+const alertManager = require('./alert-manager');
+const alertTemplate = require('./alert-template');
+const alertSenders = require('./alert-senders');
+const { ALERT_TYPES, ALERT_CHANNELS, ALERT_LEVELS, TEMPLATE_VARIABLES } = require('./alert-constants');
 
 router.get('/health', (req, res) => {
   res.json({ ok: true, timestamp: new Date().toISOString() });
@@ -252,6 +256,289 @@ router.get('/status/summary', async (req, res) => {
       counts: { up, down, maintenance, unknown },
       services: summaries
     });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/alerts/summary', async (req, res) => {
+  try {
+    const summary = await alertManager.getAlertSummary();
+    res.json(summary);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/alerts/config', (req, res) => {
+  try {
+    const cfg = alertManager.getAlertConfig();
+    res.json({
+      enabled: cfg.enabled,
+      defaultSilenceMinutes: cfg.defaultSilenceMinutes,
+      defaultConsecutiveFailures: cfg.defaultConsecutiveFailures,
+      defaultEscalationThreshold: cfg.defaultEscalationThreshold,
+      recoveryLinkBaseUrl: cfg.recoveryLinkBaseUrl,
+      channels: {
+        email: { enabled: cfg.channels.email?.enabled || false, hasConfig: !!cfg.channels.email?.smtp?.host },
+        wechat: { enabled: cfg.channels.wechat?.enabled || false, hasConfig: !!cfg.channels.wechat?.webhookUrl },
+        dingtalk: { enabled: cfg.channels.dingtalk?.enabled || false, hasConfig: !!cfg.channels.dingtalk?.webhookUrl }
+      },
+      templates: cfg.templates,
+      availableChannels: Object.values(ALERT_CHANNELS),
+      availableAlertLevels: ALERT_LEVELS
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/alerts/config/reload', async (req, res) => {
+  try {
+    const cfg = alertManager.reloadConfig();
+    res.json({ ok: true, config: cfg });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/alerts/variables', (req, res) => {
+  try {
+    res.json({ variables: TEMPLATE_VARIABLES });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/alerts/template/validate', async (req, res) => {
+  try {
+    const { template, alertType, requiredVars = [] } = req.body || {};
+    if (!template) {
+      return res.status(400).json({ error: 'template is required' });
+    }
+    const result = alertTemplate.validateTemplate(template, requiredVars);
+    res.json(result);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/alerts/template/render', async (req, res) => {
+  try {
+    const { template, alertType, variables } = req.body || {};
+    if (!alertType) {
+      return res.status(400).json({ error: 'alertType is required' });
+    }
+    const cfg = alertManager.getAlertConfig();
+    if (template) {
+      const tpl = typeof template === 'string' ? { title: template, content: template } : template;
+      const title = alertTemplate.renderTemplate(tpl.title || '', variables || {});
+      const content = alertTemplate.renderTemplate(tpl.content || '', variables || {});
+      res.json({ title, content });
+    } else {
+      const rendered = alertTemplate.renderAlert(cfg.templates, alertType, variables || {});
+      res.json(rendered);
+    }
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/alerts/records', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const offset = parseInt(req.query.offset, 10) || 0;
+    const records = await storage.alertRecords.getAll(limit, offset);
+    const parsed = records.map(r => ({
+      ...r,
+      channels: r.channels ? JSON.parse(r.channels) : [],
+      sent_channels: r.sent_channels ? JSON.parse(r.sent_channels) : [],
+      failed_channels: r.failed_channels ? JSON.parse(r.failed_channels) : []
+    }));
+    res.json({ total: parsed.length, limit, offset, records: parsed });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/alerts/records/:id', async (req, res) => {
+  try {
+    const record = await storage.alertRecords.getById(req.params.id);
+    if (!record) return res.status(404).json({ error: 'Alert record not found' });
+    const parsed = {
+      ...record,
+      channels: record.channels ? JSON.parse(record.channels) : [],
+      sent_channels: record.sent_channels ? JSON.parse(record.sent_channels) : [],
+      failed_channels: record.failed_channels ? JSON.parse(record.failed_channels) : []
+    };
+    res.json(parsed);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/alerts/records/service/:serviceId', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+    const records = await storage.alertRecords.getByService(req.params.serviceId, limit);
+    const parsed = records.map(r => ({
+      ...r,
+      channels: r.channels ? JSON.parse(r.channels) : [],
+      sent_channels: r.sent_channels ? JSON.parse(r.sent_channels) : [],
+      failed_channels: r.failed_channels ? JSON.parse(r.failed_channels) : []
+    }));
+    res.json({ serviceId: req.params.serviceId, records: parsed });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/alerts/stats', async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days, 10) || 7, 90);
+    const stats = await storage.alertRecords.getStats(days);
+    res.json({ days, ...stats });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/alerts/states', async (req, res) => {
+  try {
+    const states = await storage.alertStates.getAll();
+    res.json({ count: states.length, states });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/alerts/states/service/:serviceId', async (req, res) => {
+  try {
+    const state = await storage.alertStates.getByService(req.params.serviceId);
+    if (!state) return res.status(404).json({ error: 'Alert state not found for service' });
+    const effCfg = alertManager.getEffectiveConfig(req.params.serviceId);
+    const inSilence = alertManager.isInSilence(state.silence_until);
+    res.json({ state, effectiveConfig: effCfg, inSilence });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/alerts/service/:serviceId/silence', async (req, res) => {
+  try {
+    const serviceId = req.params.serviceId;
+    const minutes = parseInt(req.body?.minutes, 10);
+    if (minutes === undefined || isNaN(minutes)) {
+      return res.status(400).json({ error: 'minutes is required' });
+    }
+    const svc = await storage.services.getById(serviceId);
+    if (!svc) return res.status(404).json({ error: 'Service not found' });
+    const state = await alertManager.setServiceSilence(serviceId, minutes);
+    notifier.broadcast({
+      type: 'alert_silence_updated',
+      serviceId,
+      silenceMinutes: minutes,
+      silenceUntil: state?.silence_until,
+      timestamp: new Date().toISOString()
+    });
+    res.json({ ok: true, serviceId, silenceMinutes: minutes, silenceUntil: state?.silence_until });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/alerts/config-overrides/service/:serviceId', async (req, res) => {
+  try {
+    const override = await storage.alertConfigOverrides.getByService(req.params.serviceId);
+    res.json({ serviceId: req.params.serviceId, override: override || null });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/alerts/config-overrides/service/:serviceId', async (req, res) => {
+  try {
+    const serviceId = req.params.serviceId;
+    const svc = await storage.services.getById(serviceId);
+    if (!svc) return res.status(404).json({ error: 'Service not found' });
+    const data = req.body || {};
+    const allowed = [
+      'silence_minutes', 'consecutive_failures', 'escalation_threshold',
+      'escalation_level', 'enable_email', 'enable_wechat', 'enable_dingtalk',
+      'custom_recipients_json'
+    ];
+    const toUpdate = {};
+    for (const key of allowed) {
+      if (key in data) toUpdate[key] = data[key];
+    }
+    const result = await storage.alertConfigOverrides.upsertByService(serviceId, toUpdate);
+    res.json(result);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/alerts/config-overrides/:id', async (req, res) => {
+  try {
+    await storage.alertConfigOverrides.remove(req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/alerts/test', async (req, res) => {
+  try {
+    const { serviceId, channels, alertLevel, serviceName, errorMessage, failureCount } = req.body || {};
+    const result = await alertManager.sendTestAlert(serviceId, {
+      channels,
+      alertLevel: alertLevel != null ? parseInt(alertLevel, 10) : ALERT_LEVELS.L0,
+      serviceName,
+      errorMessage,
+      failureCount: failureCount != null ? parseInt(failureCount, 10) : 1
+    });
+    res.json(result);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/alerts/test/channel', async (req, res) => {
+  try {
+    const { channel, title, content, useEscalation = false, alertLevel = ALERT_LEVELS.L0 } = req.body || {};
+    if (!channel) return res.status(400).json({ error: 'channel is required' });
+    const cfg = alertManager.getAlertConfig();
+    const testTitle = title || `【测试告警】${channel} 渠道测试`;
+    const testContent = content || `这是一条通过 ${channel} 渠道发送的测试告警消息。\n发送时间：${new Date().toISOString()}\n如果收到此消息，说明 ${channel} 渠道配置正常。`;
+    try {
+      const result = await alertSenders.sendToChannel(channel, cfg, {
+        title: testTitle,
+        content: testContent,
+        alertLevel: parseInt(alertLevel, 10),
+        useEscalation: !!useEscalation
+      });
+      res.json({ success: true, channel, result });
+    } catch (e) {
+      res.status(400).json({ success: false, channel, error: e.message });
+    }
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e.message });

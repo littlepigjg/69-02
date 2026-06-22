@@ -7,6 +7,7 @@ const storage = require('./storage');
 const scheduler = require('./scheduler');
 const notifier = require('./notifier');
 const routes = require('./routes');
+const alertManager = require('./alert-manager');
 
 const app = express();
 const server = http.createServer(app);
@@ -39,6 +40,8 @@ async function start() {
   console.log(`[Storage] Logs directory: ${config.logDir}`);
 
   notifier.init(server);
+  await alertManager.init();
+  console.log(`[AlertManager] Initialized`);
   await scheduler.startAll();
 
   setInterval(() => {

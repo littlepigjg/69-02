@@ -5,5 +5,64 @@
   "dataRetentionDays": 30,
   "defaultCheckIntervalSeconds": 30,
   "defaultTimeoutMs": 5000,
-  "trendWindowHours": 24
+  "trendWindowHours": 24,
+  "alerts": {
+    "enabled": true,
+    "defaultSilenceMinutes": 30,
+    "defaultConsecutiveFailures": 3,
+    "defaultEscalationThreshold": 5,
+    "defaultEscalationLevel": 1,
+    "recoveryLinkBaseUrl": "http://localhost:3000",
+    "channels": {
+      "email": {
+        "enabled": false,
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 587,
+          "secure": false,
+          "auth": {
+            "user": "alerts@example.com",
+            "pass": "your-password"
+          }
+        },
+        "from": "alerts@example.com",
+        "recipients": ["ops-team@example.com"],
+        "escalationRecipients": ["manager@example.com", "director@example.com"]
+      },
+      "wechat": {
+        "enabled": false,
+        "webhookUrl": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY",
+        "mentionedMobileList": [],
+        "mentionedList": [],
+        "escalationWebhookUrl": "",
+        "escalationMentionedMobileList": ["13800000000"]
+      },
+      "dingtalk": {
+        "enabled": false,
+        "webhookUrl": "https://oapi.dingtalk.com/robot/send?access_token=YOUR_TOKEN",
+        "secret": "",
+        "atMobiles": [],
+        "atUserIds": [],
+        "isAtAll": false,
+        "escalationWebhookUrl": "",
+        "escalationSecret": "",
+        "escalationAtMobiles": ["13800000000"],
+        "escalationIsAtAll": false
+      }
+    },
+    "templates": {
+      "down": {
+        "title": "【服务故障告警】{{serviceName}}",
+        "content": "服务名称：{{serviceName}}\n故障时间：{{failureTime}}\n连续失败：{{failureCount}}次\n错误信息：{{errorMessage}}\n快速恢复：{{recoveryLink}}"
+      },
+      "escalation": {
+        "title": "【告警升级】{{serviceName}} 持续故障超过{{threshold}}次",
+        "content": "⚠️ 告警升级 ⚠️\n服务名称：{{serviceName}}\n故障时间：{{failureTime}}\n连续失败：{{failureCount}}次\n当前级别：L{{alertLevel}}\n错误信息：{{errorMessage}}\n快速恢复：{{recoveryLink}}"
+      },
+      "recovery": {
+        "title": "【服务恢复通知】{{serviceName}}",
+        "content": "✅ 服务已恢复正常\n服务名称：{{serviceName}}\n恢复时间：{{recoveryTime}}\n故障时长：{{downtimeDuration}}\n快速恢复：{{recoveryLink}}"
+      }
+    }
+  }
 }

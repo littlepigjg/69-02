@@ -2,6 +2,7 @@ const { checkService } = require('./checker')
 const storage = require('./storage')
 const status = require('./status')
 const notifier = require('./notifier')
+const alertManager = require('./alert-manager')
 const { DEFAULT_CONFIG } = require('./constants')
 const { clamp } = require('./utils')
 
@@ -56,6 +57,19 @@ async function runCheck(service) {
       if (previous !== undefined) {
         notifier.notifyStatusChange(service.id, summary.status, summary)
       }
+    }
+
+    try {
+      const alertResult = await alertManager.processCheckResult(service, storedResult, summary)
+      if (alertResult?.sent) {
+        console.log(`[Scheduler] Alert sent for "${service.name}": ${alertResult.alertType} L${alertResult.alertLevel} via [${alertResult.channels?.join(',')}]`)
+      } else if (alertResult?.skipped && alertResult.reason?.startsWith('failures_')) {
+        // 正常积累失败次数，无需输出
+      } else if (alertResult?.error) {
+        console.error(`[Scheduler] Alert processing error for "${service.name}":`, alertResult.error)
+      }
+    } catch (alertErr) {
+      console.error(`[Scheduler] Alert processing error for ${service.name}:`, alertErr.message)
     }
   } catch (e) {
     console.error(`[Scheduler] Summary calc error for ${service.name}:`, e.message)
