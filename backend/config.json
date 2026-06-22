@@ -1,0 +1,9 @@
+{
+  "port": 3001,
+  "dbPath": "./data/monitor.db",
+  "logDir": "./data/logs",
+  "dataRetentionDays": 30,
+  "defaultCheckIntervalSeconds": 30,
+  "defaultTimeoutMs": 5000,
+  "trendWindowHours": 24
+}
