@@ -62,9 +62,19 @@ async function runCheck(service) {
     try {
       const alertResult = await alertManager.processCheckResult(service, storedResult, summary)
       if (alertResult?.sent) {
-        console.log(`[Scheduler] Alert sent for "${service.name}": ${alertResult.alertType} L${alertResult.alertLevel} via [${alertResult.channels?.join(',')}]`)
-      } else if (alertResult?.skipped && alertResult.reason?.startsWith('failures_')) {
-        // 正常积累失败次数，无需输出
+        console.log(`[Scheduler] Alert sent for "${service.name}": ${alertResult.alertType} L${alertResult.alertLevel} via [${alertResult.channels?.join(',')}], recipients: [${alertResult.recipients?.join(', ')}]`)
+      } else if (alertResult?.skipped) {
+        if (alertResult.reason?.startsWith('failures_')) {
+          // 正常积累失败次数，无需输出
+        } else if (alertResult.reason === 'no_enabled_channels') {
+          // 只在首次或间隔输出，避免刷屏
+          if (!service._noChannelWarned) {
+            console.log(`[Scheduler] Alert skipped for "${service.name}": no enabled channels. Configure channels in config.json alerts.channels.*.enabled`)
+            service._noChannelWarned = true
+          }
+        } else if (alertResult.decision?.isEscalation) {
+          console.log(`[Scheduler] Alert escalation would trigger for "${service.name}": L${alertResult.decision.alertLevel} (silenceUntil: ${alertResult.decision.inManualSilence ? 'manual' : 'no'})`)
+        }
       } else if (alertResult?.error) {
         console.error(`[Scheduler] Alert processing error for "${service.name}":`, alertResult.error)
       }

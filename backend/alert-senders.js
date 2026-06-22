@@ -2,6 +2,7 @@ const axios = require('axios')
 const crypto = require('crypto')
 const { ALERT_CHANNELS, ALERT_LEVELS, WECHAT_MSG_TYPES, DINGTALK_MSG_TYPES } = require('./alert-constants')
 const { escapeHtml, escapeMarkdown } = require('./alert-template')
+const { getMergedRecipients } = require('./alert-decision')
 
 let nodemailer = null
 try {
@@ -189,16 +190,13 @@ function getEnabledChannels(config, overrides = null) {
   return channels
 }
 
-function getEscalationRecipients(config, alertLevel) {
+function getEscalationRecipients(config, alertLevel, isEscalation = false) {
   const result = {}
   const emailCfg = config?.channels?.email
-  if (emailCfg?.escalationRecipients?.length > 0) {
-    const recipients = [...emailCfg.recipients || []]
-    for (let i = 0; i < alertLevel && i < emailCfg.escalationRecipients.length; i++) {
-      recipients.push(emailCfg.escalationRecipients[i])
-    }
-    result.email = [...new Set(recipients)]
-  }
+  const defaultRecipients = emailCfg?.recipients || []
+  const escalationRecipients = emailCfg?.escalationRecipients || []
+  const effectiveLevel = isEscalation ? alertLevel : Math.max(0, alertLevel - 1)
+  result.email = getMergedRecipients(defaultRecipients, escalationRecipients, effectiveLevel)
   return result
 }
 
