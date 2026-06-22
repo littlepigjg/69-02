@@ -195,8 +195,14 @@ function getEscalationRecipients(config, alertLevel, isEscalation = false) {
   const emailCfg = config?.channels?.email
   const defaultRecipients = emailCfg?.recipients || []
   const escalationRecipients = emailCfg?.escalationRecipients || []
-  const effectiveLevel = isEscalation ? alertLevel : Math.max(0, alertLevel - 1)
-  result.email = getMergedRecipients(defaultRecipients, escalationRecipients, effectiveLevel)
+
+  if (isEscalation) {
+    const count = Math.min(alertLevel, escalationRecipients.length)
+    result.email = escalationRecipients.slice(0, count)
+  } else {
+    result.email = [...defaultRecipients]
+  }
+
   return result
 }
 

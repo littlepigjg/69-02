@@ -100,21 +100,29 @@ async function sendAlert(service, state, checkResult, decision, overrides) {
     sendResult.errors.length > 0 ? sendResult.errors.join('; ') : null
   )
 
+  const alertTime = new Date().toISOString()
   await storage.alertStates.updateAlertSent(
     service.id,
-    new Date().toISOString(),
+    alertTime,
     decision.alertLevel,
     record.id
   )
+
+  const updatedState = {
+    ...state,
+    last_alert_time: alertTime,
+    last_alert_level: decision.alertLevel,
+    last_sent_alert_id: record.id
+  }
 
   const broadcastType = isEscalation ? 'escalation_alert' : 'new_alert'
   notifier.broadcast({
     type: broadcastType,
     alert: updatedRecord,
     service,
-    state,
+    state: updatedState,
     decision,
-    timestamp: new Date().toISOString()
+    timestamp: alertTime
   })
 
   return {
@@ -126,7 +134,8 @@ async function sendAlert(service, state, checkResult, decision, overrides) {
     sendResult,
     record: updatedRecord,
     recipients: escalationRecipients.email,
-    decision
+    decision,
+    state: updatedState
   }
 }
 
