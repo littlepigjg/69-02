@@ -38,9 +38,11 @@ function shouldTriggerAlert(state, effCfg) {
     ALERT_LEVELS.L0
   )
 
-  const isEscalation = state.last_alert_level != null
-    ? newLevel > state.last_alert_level
-    : newLevel > ALERT_LEVELS.L0
+  const previousLevel = state.current_alert_level != null
+    ? state.current_alert_level
+    : (state.last_alert_level != null ? state.last_alert_level : ALERT_LEVELS.L0)
+
+  const isEscalation = newLevel > previousLevel
 
   const inManualSilence = isInSilence(state.silence_until)
 

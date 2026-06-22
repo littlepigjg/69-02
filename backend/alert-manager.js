@@ -112,6 +112,7 @@ async function sendAlert(service, state, checkResult, decision, overrides) {
     ...state,
     last_alert_time: alertTime,
     last_alert_level: decision.alertLevel,
+    current_alert_level: decision.alertLevel,
     last_sent_alert_id: record.id
   }
 
@@ -148,6 +149,9 @@ async function handleServiceDown(service, checkResult) {
   const state = await storage.alertStates.recordFailure(service.id, timestamp)
   const effCfg = resolveEffectiveConfig(service.id, overrides)
   const decision = shouldTriggerAlert(state, effCfg)
+
+  await storage.alertStates.updateCurrentAlertLevel(service.id, decision.alertLevel)
+  state.current_alert_level = decision.alertLevel
 
   if (!decision.shouldSend) {
     return { skipped: true, reason: decision.reason, state, decision }

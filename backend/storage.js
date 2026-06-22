@@ -121,12 +121,18 @@ async function initDB() {
       last_failure_time TEXT,
       last_alert_time TEXT,
       last_alert_level INTEGER DEFAULT 0,
+      current_alert_level INTEGER DEFAULT 0,
       last_sent_alert_id INTEGER,
       silence_until TEXT,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
   dirty = true;
+
+  try {
+    db.run('ALTER TABLE alert_states ADD COLUMN current_alert_level INTEGER DEFAULT 0');
+    dirty = true;
+  } catch (e) {}
 
   db.run(`
     CREATE TABLE IF NOT EXISTS alert_config_overrides (
@@ -448,6 +454,7 @@ const alertStates = {
       first_failure_time: null,
       last_failure_time: null,
       last_alert_level: 0,
+      current_alert_level: 0,
       silence_until: null
     });
   },
@@ -455,7 +462,13 @@ const alertStates = {
     return alertStates.upsert(serviceId, {
       last_alert_time: alertTime,
       last_alert_level: alertLevel,
+      current_alert_level: alertLevel,
       last_sent_alert_id: alertId
+    });
+  },
+  updateCurrentAlertLevel: async (serviceId, alertLevel) => {
+    return alertStates.upsert(serviceId, {
+      current_alert_level: alertLevel
     });
   },
   setSilence: async (serviceId, silenceUntilISO) => {
